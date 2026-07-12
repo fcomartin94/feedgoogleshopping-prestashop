@@ -64,6 +64,14 @@ ModuleFrontController`, overriding `initContent()` to:
 
 1. Query active products joined with `product_attribute` (combinations),
    `product_lang`, `category_lang`, and cover `image` — one row per sellable variant.
+   This uses a direct `Db::getInstance()->executeS()` query instead of PrestaShop's
+   `Product`/`Category` ORM classes: the ORM has no built-in way to fetch "one row
+   per combination across all products" in a single call, so doing it through the
+   ORM would mean looping over every `Product`, then every combination inside it,
+   issuing separate queries each time (classic N+1). For a feed endpoint that has to
+   run fast and stay lightweight, one SQL query with the necessary `JOIN`s is the
+   right tool here — the ORM is used everywhere else in the controller (stock,
+   pricing, URLs) where it doesn't come with that cost.
 2. For each row, resolve real stock via `StockAvailable::getQuantityAvailableByProduct()`
    and real tax-included price via `Product::getPriceStatic()`, rather than reading
    raw `price` (tax-excluded, no discounts applied).
