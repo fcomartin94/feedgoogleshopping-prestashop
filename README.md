@@ -6,8 +6,8 @@ task, a real module with a front controller, database queries, and XML generatio
 
 ## Why this project
 
-The other three projects in this portfolio (Mythic Books, Brew & Co., Volt & Circuit)
-are about building and auditing stores — configuring platforms, fixing SEO issues,
+The other projects in this portfolio (Mythic Books, Brew & Co., Volt & Circuit) are
+about building and auditing stores — configuring platforms, fixing SEO issues,
 managing catalogs. This project is different on purpose: it demonstrates writing
 actual PrestaShop module code (hooks, controllers, the module lifecycle), which is
 what separates "store operator" from "platform developer" in a client's eyes.
@@ -31,36 +31,18 @@ correct currency), `g:brand`, `g:condition`, `g:mpn`.
 - `XMLWriter` for safe, correctly-escaped XML generation (no manual string
   concatenation)
 
-## Progress Log
+## Implementation
 
-### Step 1 — Module design
+Module structure follows PrestaShop convention: `feedgoogleshopping.php` (main module
+class extending `Module`), `controllers/front/feed.php` (the front controller serving
+the feed), `config.xml` (manifest). No hooks are registered — the feed is served
+entirely through the front controller rather than injected into any theme template.
 
-Decided on the module's technical name (`feedgoogleshopping` — lowercase, no
-separators, per PrestaShop convention), folder structure
-(`feedgoogleshopping.php` + `controllers/front/feed.php` + `config.xml`), and the
-field mapping from PrestaShop's data model to Google Merchant Center's required feed
-fields (see table above). Chose to key feed items on `id_product` +
-`id_product_attribute` (when combinations exist) rather than one row per product,
-since Google Shopping expects one entry per sellable variant, not per product.
+Feed items are keyed on `id_product` + `id_product_attribute` (when combinations
+exist) rather than one row per product, since Google Shopping expects one entry per
+sellable variant, not per product.
 
-### Step 2 — `config.xml`
-
-Module manifest: name, display name, version, author, tags, PrestaShop version
-compliancy (`8`). This is the minimal descriptor PrestaShop reads to list the module
-in the back office before it's even installed.
-
-### Step 3 — `feedgoogleshopping.php`
-
-Main module class extending `Module`. Minimal implementation: constructor sets
-`name`, `tab` (`front_office_features`), `version`, `ps_versions_compliancy`, and
-calls `parent::__construct()`. `install()`/`uninstall()` just delegate to the parent
-— no hooks are registered, since the feed is served entirely through a front
-controller rather than injected into any theme template.
-
-### Step 4 — `controllers/front/feed.php`
-
-The core of the module. `FeedGoogleShoppingFeedModuleFrontController extends
-ModuleFrontController`, overriding `initContent()` to:
+`FeedGoogleShoppingFeedModuleFrontController` overrides `initContent()` to:
 
 1. Query active products joined with `product_attribute` (combinations),
    `product_lang`, `category_lang`, and cover `image` — one row per sellable variant.
@@ -68,47 +50,31 @@ ModuleFrontController`, overriding `initContent()` to:
    `Product`/`Category` ORM classes: the ORM has no built-in way to fetch "one row
    per combination across all products" in a single call, so doing it through the
    ORM would mean looping over every `Product`, then every combination inside it,
-   issuing separate queries each time (classic N+1). For a feed endpoint that has to
-   run fast and stay lightweight, one SQL query with the necessary `JOIN`s is the
-   right tool here — the ORM is used everywhere else in the controller (stock,
-   pricing, URLs) where it doesn't come with that cost.
-2. For each row, resolve real stock via `StockAvailable::getQuantityAvailableByProduct()`
-   and real tax-included price via `Product::getPriceStatic()`, rather than reading
-   raw `price` (tax-excluded, no discounts applied).
-3. Build the product URL and image URL via `Context::getContext()->link` (PrestaShop's
-   own URL-building helpers), so friendly URLs and multi-shop/multi-lang setups are
+   issuing separate queries each time. For a feed endpoint that has to run fast and
+   stay lightweight, one SQL query with the necessary `JOIN`s is the right tool here
+   — the ORM is used everywhere else in the controller (stock, pricing, URLs) where
+   it doesn't come with that cost.
+2. Resolves real stock via `StockAvailable::getQuantityAvailableByProduct()` and
+   real tax-included price via `Product::getPriceStatic()`, rather than reading raw
+   `price` (tax-excluded, no discounts applied).
+3. Builds product and image URLs via `Context::getContext()->link` (PrestaShop's own
+   URL-building helpers), so friendly URLs and multi-shop/multi-lang setups are
    respected automatically instead of hand-building link strings.
-4. Write the RSS/`g:` XML with `XMLWriter`, which handles character escaping
+4. Writes the RSS/`g:` XML with `XMLWriter`, which handles character escaping
    correctly (product names/descriptions can contain `&`, `<`, `>`, quotes) — safer
    than string concatenation.
 
-### Step 5 — Installing and testing against Volt & Circuit
+### Variant URLs and the `#` fragment issue
 
-Copied the module into the running Docker container and installed it from the back
-office (**Modules → Module Manager → Feed Export for Google Shopping → Install**):
+`Link::getProductLink()` with an `$idProductAttribute` argument produces URLs using a
+`#` fragment for the variant (e.g. `.../headphones.html#/color-black`) — a fragment is
+never sent to the server, so Google would always land on the default variant
+regardless of which specific variant a given feed item claims to represent. This
+matters when variants differ in price, image, or availability, and is the same
+PrestaShop 8.1 behavior documented in the `volt-circuit-prestashop-seo` SEO audit.
 
-```bash
-docker cp feedgoogleshopping volt-circuit-prestashop:/var/www/html/modules/feedgoogleshopping
-```
-
-Loaded `http://localhost:8080/module/feedgoogleshopping/feed` directly. **Result: it
-worked on the first try** — 26 `<item>` entries (matching the 26 combinations seeded
-in Volt & Circuit), correct tax-included prices, correct stock-derived availability,
-correct images, and correct MPNs per variant, including the 4-way Color × Model
-combinations on Terra Leather Case (verified each of the 4 combinations produced a
-distinct, correctly-labeled item).
-
-**Bug found and fixed: variant URLs used a `#` fragment, unusable for Google.**
-`Link::getProductLink()` with an `$idProductAttribute` argument produced URLs like
-`.../1-aether-wireless-headphones.html#/color-black` — a URL fragment, which is never
-sent to the server. This is the exact same PrestaShop 8.1 behavior already documented
-as Finding 4 in the `volt-circuit-prestashop-seo` SEO audit project. For a feed meant
-to be crawled by Google, this is a real defect: Google would always land on the
-default variant regardless of which specific variant the feed item claims to
-represent — a problem if variants differ in price, image, or availability.
-
-**Fix**: build the base product URL without the attribute argument, then manually
-append PrestaShop's real query-string parameter instead:
+Fixed by building the base product URL without the attribute argument, then appending
+PrestaShop's real query-string parameter manually:
 
 ```php
 $productUrl = $link->getProductLink($idProduct, $row['link_rewrite'], $row['category_rewrite']);
@@ -118,19 +84,20 @@ if ($idProductAttribute) {
 ```
 
 `?id_product_attribute=X` is read server-side by PrestaShop and selects the correct
-combination on first request — no JavaScript or fragment dependency. Re-copied the
-updated controller and re-verified: URLs like
-`.../1-aether-wireless-headphones.html?id_product_attribute=2` now appear correctly
-in the feed, one distinct crawlable URL per variant.
+combination on the first request — no JavaScript or fragment dependency, and each
+variant gets a distinct, crawlable URL.
 
-**Takeaway**: this is a good example of a bug that showed up identically in two
-different projects in this portfolio (the audit and this module) — recognizing it
-from prior work made diagnosis immediate instead of starting from scratch.
+## Testing
+
+Installed into the Volt & Circuit store (`docker cp` into the running container,
+installed from **Modules → Module Manager**). The feed at
+`/module/feedgoogleshopping/feed` returns 26 `<item>` entries matching the 26 seeded
+combinations, with correct tax-included prices, stock-derived availability, images,
+and MPNs per variant — including the 4-way Color × Model combinations on one product,
+each producing a distinct, correctly-labeled item.
 
 ## Screenshots
 
 See `/screenshots`:
 - `module_installed.png` — module listed and installed in the PrestaShop back office
 - `feed_output.png` — the generated XML feed, rendered in the browser
-
-<!-- Next: build the WooCommerce equivalent, then push both to GitHub and add to the portfolio. -->
