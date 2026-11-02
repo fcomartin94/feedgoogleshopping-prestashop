@@ -101,3 +101,7 @@ each producing a distinct, correctly-labeled item.
 See `/screenshots`:
 - `module_installed.png` — module listed and installed in the PrestaShop back office
 - `feed_output.png` — the generated XML feed, rendered in the browser
+
+## License
+
+Released under the [MIT License](LICENSE).
