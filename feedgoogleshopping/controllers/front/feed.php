@@ -42,6 +42,7 @@ class FeedGoogleShoppingFeedModuleFrontController extends ModuleFrontController
                 pa.reference AS combination_reference,
                 p.price,
                 p.id_tax_rules_group,
+                p.id_manufacturer,
                 cl.link_rewrite AS category_rewrite,
                 cl.id_category,
                 img.id_image
@@ -92,25 +93,27 @@ class FeedGoogleShoppingFeedModuleFrontController extends ModuleFrontController
             );
 
             $productUrl = $link->getProductLink($idProduct, $row['link_rewrite'], $row['category_rewrite']);
-	    if ($idProductAttribute) {
-		$productUrl .= (strpos($productUrl, '?') === false ? '?' : '&').'id_product_attribute='.$idProductAttribute;
-	    }
+        if ($idProductAttribute) {
+        $productUrl .= (strpos($productUrl, '?') === false ? '?' : '&').'id_product_attribute='.$idProductAttribute;
+        }
             $imageUrl = $row['id_image']
                 ? $link->getImageLink($row['link_rewrite'], $row['id_image'], 'large_default')
                 : '';
 
             $itemId = $idProductAttribute ? $idProduct.'-'.$idProductAttribute : (string) $idProduct;
             $mpn = $row['combination_reference'] ?: $row['product_reference'];
+            $brand = $row['id_manufacturer'] ? Manufacturer::getNameById((int) $row['id_manufacturer']) : '';
+            $description = trim(strip_tags($row['description_short'])) ?: $row['name'];
 
             $xml->startElement('item');
             $xml->writeElement('g:id', $itemId);
             $xml->writeElement('g:title', $row['name']);
-            $xml->writeElement('g:description', strip_tags($row['description_short']));
+            $xml->writeElement('g:description', $description);
             $xml->writeElement('g:link', $productUrl);
             $xml->writeElement('g:image_link', $imageUrl);
             $xml->writeElement('g:availability', $availability);
             $xml->writeElement('g:price', number_format((float) $priceTaxIncl, 2, '.', '').' '.$currency->iso_code);
-            $xml->writeElement('g:brand', $shopName);
+            $xml->writeElement('g:brand', $brand ?: $shopName);
             $xml->writeElement('g:condition', 'new');
             if ($mpn) {
                 $xml->writeElement('g:mpn', $mpn);

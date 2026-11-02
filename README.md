@@ -21,7 +21,7 @@ matching the format Google Merchant Center expects for automatic feed ingestion.
 
 Fields included per item: `g:id`, `g:title`, `g:description`, `g:link`,
 `g:image_link`, `g:availability` (derived from real stock), `g:price` (tax included,
-correct currency), `g:brand`, `g:condition`, `g:mpn`.
+correct currency), `g:brand` (the product's manufacturer, falling back to the shop name), `g:condition`, `g:mpn`. When a product has no short description, its name is used so `g:description` is never empty.
 
 ## Stack
 
@@ -105,3 +105,8 @@ See `/screenshots`:
 ## License
 
 Released under the [MIT License](LICENSE).
+
+## Known limitations
+
+- The feed is generated on every request: fine for small catalogs, but a large store should cache it.
+- `g:gtin` is not exported, so products without a GTIN rely on `g:mpn` for identification.
